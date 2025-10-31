@@ -208,6 +208,11 @@ public class SSOController : ControllerBase
                     }
                 }
 
+                if (claim.Type == "sub")
+                {
+                    timedState.Id = claim.Value;
+                }
+
                 // Role processing
                 // The regex matches any "." not preceded by a "\": a.b.c will be split into a, b, and c, but a.b\.c will be split into a, b.c (after processing the escaped dots)
                 // We have to first process the RoleClaim string
@@ -338,16 +343,10 @@ public class SSOController : ControllerBase
             // If the provider doesn't support the preferred username claim, then use the sub claim
             if (!timedState.Valid)
             {
-                foreach (var claim in result.User.Claims)
+                timedState.Username = timedState.Id;
+                if (config.Roles.Length == 0)
                 {
-                    if (claim.Type == "sub")
-                    {
-                        timedState.Username = claim.Value;
-                        if (config.Roles.Length == 0)
-                        {
-                            timedState.Valid = true;
-                        }
-                    }
+                    timedState.Valid = true;
                 }
             }
 
@@ -644,7 +643,7 @@ public class SSOController : ControllerBase
             && string.Equals(pendingState.Provider, provider, StringComparison.Ordinal)
             && StateManager.TryRemove(response.Data, out var timedState))
         {
-            Guid userId = await CreateCanonicalLinkAndUserIfNotExist("oid", provider, timedState.Username);
+            Guid userId = await CreateCanonicalLinkAndUserIfNotExist("oid", provider, timedState.Id, timedState.Username);
 
             var authenticationResult = await Authenticate(
                 userId,
@@ -742,6 +741,7 @@ public class SSOController : ControllerBase
 
             // Apply the same username and role extraction logic as the redirect flow
             string username = null;
+            string subject = null;
             bool valid = false;
             bool isAdmin = false;
             var folders = new List<string>();
@@ -779,6 +779,11 @@ public class SSOController : ControllerBase
                     {
                         valid = true;
                     }
+                }
+
+                if (claim.Type == "sub")
+                {
+                    subject = claim.Value;
                 }
 
                 if (segments.Any() && claim.Type == segments[0])
@@ -892,16 +897,10 @@ public class SSOController : ControllerBase
             // Fallback to "sub" claim if no preferred_username claim found or roles insufficient
             if (!valid)
             {
-                foreach (var claim in claims)
+                username = subject;
+                if (config.Roles == null || config.Roles.Length == 0)
                 {
-                    if (claim.Type == "sub")
-                    {
-                        username = claim.Value;
-                        if (config.Roles == null || config.Roles.Length == 0)
-                        {
-                            valid = true;
-                        }
-                    }
+                    valid = true;
                 }
             }
 
@@ -923,7 +922,7 @@ public class SSOController : ControllerBase
                 AppVersion = request.AppVersion,
             };
 
-            var userId = await CreateCanonicalLinkAndUserIfNotExist("oid", provider, username).ConfigureAwait(false);
+            var userId = await CreateCanonicalLinkAndUserIfNotExist("oid", provider, subject, username).ConfigureAwait(false);
             var authenticationResult = await Authenticate(
                 userId,
                 isAdmin,
@@ -1310,7 +1309,7 @@ public class SSOController : ControllerBase
                 }
             }
 
-            Guid userId = await CreateCanonicalLinkAndUserIfNotExist("saml", provider, samlResponse.GetNameID());
+            Guid userId = await CreateCanonicalLinkAndUserIfNotExist("saml", provider, samlResponse.GetNameID(), samlResponse.GetNameID());
 
             var authenticationResult = await Authenticate(
                 userId,
@@ -1372,7 +1371,7 @@ public class SSOController : ControllerBase
         return links;
     }
 
-    private async Task<Guid> CreateCanonicalLinkAndUserIfNotExist(string mode, string provider, string canonicalName)
+    private async Task<Guid> CreateCanonicalLinkAndUserIfNotExist(string mode, string provider, string canonicalId, string canonicalName)
     {
         User user = null;
 
@@ -1380,7 +1379,7 @@ public class SSOController : ControllerBase
         Guid userId = Guid.Empty;
         try
         {
-            userId = GetCanonicalLink(mode, provider, canonicalName);
+            userId = GetCanonicalLink(mode, provider, canonicalId);
         }
         catch (KeyNotFoundException)
         {
@@ -1413,7 +1412,7 @@ public class SSOController : ControllerBase
 
         if (user == null)
         {
-            _logger.LogInformation($"SSO user {canonicalName} doesn't exist, creating...");
+            _logger.LogInformation($"SSO user {canonicalName} ({canonicalId}) doesn't exist, creating...");
             user = await _userManager.CreateUserAsync(canonicalName).ConfigureAwait(false);
             user.AuthenticationProviderId = GetType().FullName;
             // https://jonathancrozier.com/blog/how-to-generate-a-cryptographically-secure-random-string-in-dot-net-with-c-sharp
@@ -1433,14 +1432,13 @@ public class SSOController : ControllerBase
 
             // Make sure there aren't any trailing existing links
             var links = GetCanonicalLinks(mode, provider);
-            links.Remove(canonicalName);
+            links.Remove(canonicalId);
             UpdateCanonicalLinkConfig(links, mode, provider);
         }
 
-        userId = Guid.Empty;
         try
         {
-            userId = GetCanonicalLink(mode, provider, canonicalName);
+            userId = GetCanonicalLink(mode, provider, canonicalId);
         }
         catch (KeyNotFoundException)
         {
@@ -1452,22 +1450,16 @@ public class SSOController : ControllerBase
         {
             _logger.LogInformation("SSO user link doesn't exist or is outdated, creating...");
             userId = user.Id;
-            CreateCanonicalLink(mode, provider, userId, canonicalName);
+            CreateCanonicalLink(mode, provider, userId, canonicalId);
         }
 
         return userId;
     }
 
-    private Guid GetCanonicalLink(string mode, string provider, string canonicalName)
+    private Guid GetCanonicalLink(string mode, string provider, string canonicalId)
     {
-        SerializableDictionary<string, Guid> links = null;
-        Guid userId = Guid.Empty;
-
-        links = GetCanonicalLinks(mode, provider);
-
-        userId = links[canonicalName];
-
-        return userId;
+        var links = GetCanonicalLinks(mode, provider);
+        return links[canonicalId];
     }
 
     /// <summary>
@@ -2026,9 +2018,14 @@ public class TimedAuthorizeState
     public bool Valid { get; set; }
 
     /// <summary>
-    /// Gets or sets the user tied to the state.
+    /// Gets or sets the user name tied to the state.
     /// </summary>
     public string Username { get; set; }
+
+    /// <summary>
+    /// Gets or sets the user id tied to the state.
+    /// </summary>
+    public string Id { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether the user is an administrator.
