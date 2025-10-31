@@ -1453,6 +1453,13 @@ public class SSOController : ControllerBase
             CreateCanonicalLink(mode, provider, userId, canonicalId);
         }
 
+        if (user.Username != canonicalName)
+        {
+            _logger.LogInformation($"SSO user {canonicalName} ({canonicalId}) has mismatched username {user.Username}, updating...");
+            user.Username = canonicalName;
+            await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
+        }
+
         return userId;
     }
 
