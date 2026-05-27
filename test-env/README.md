@@ -45,6 +45,8 @@ Jellyfin admin (out-of-band, for the admin dashboard):
 
 ## Scripts
 
+The bash scripts below are thin wrappers around a C# CLI; see [Direct CLI usage](#direct-cli-usage) for details on calling the orchestrator directly.
+
 | Script                   | Purpose                                                |
 |--------------------------|--------------------------------------------------------|
 | `up.sh`                  | Full bring-up. Idempotent.                             |
@@ -54,6 +56,21 @@ Jellyfin admin (out-of-band, for the admin dashboard):
 | `provision.sh`           | Re-register the SSO provider (called by `up.sh`).      |
 | `snapshot-create.sh`     | Rebuild the baseline from scratch via manual wizard.   |
 | `snapshot-refresh.sh`    | Migrate an existing snapshot to a new Jellyfin version. |
+
+## Direct CLI usage
+
+The orchestration logic lives in `test-env/SSO-Auth.TestEnv/`. The bash scripts above
+are thin wrappers around its subcommands. You can also call the CLI directly:
+
+```bash
+dotnet run --project test-env/SSO-Auth.TestEnv -- up
+dotnet run --project test-env/SSO-Auth.TestEnv -- down [--volumes]
+dotnet run --project test-env/SSO-Auth.TestEnv -- reload
+dotnet run --project test-env/SSO-Auth.TestEnv -- provision
+```
+
+The bash wrappers exist mainly for shell auto-complete and shorter command lines;
+they invoke the same CLI under the hood.
 
 ## Version pins
 

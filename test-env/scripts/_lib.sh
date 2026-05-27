@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Shared helpers. Source from each script with:
-#   source "$(dirname "$0")/_lib.sh"
+# Shared helpers used by snapshot-{create,refresh}.sh and by the CLI wrappers
+# (up.sh / down.sh / reload.sh / provision.sh).
+#
+# Most orchestration logic has moved into test-env/SSO-Auth.TestEnv/.
 
 set -euo pipefail
 
-# Resolve repo root and test-env root regardless of where the script was invoked from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
 TEST_ENV_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${TEST_ENV_DIR}/.." && pwd)"
@@ -13,6 +14,9 @@ COMPOSE_FILE="${TEST_ENV_DIR}/docker-compose.yml"
 JELLYFIN_BASE_URL="http://localhost:8096"
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="admin"
+
+TEST_ENV_PROJECT="${REPO_ROOT}/test-env/SSO-Auth.TestEnv"
+TEST_ENV_DLL="${TEST_ENV_PROJECT}/bin/Debug/net9.0/SSO-Auth.TestEnv.dll"
 
 log()  { printf "\033[1;34m[+] %s\033[0m\n" "$*"; }
 warn() { printf "\033[1;33m[!] %s\033[0m\n" "$*" >&2; }
@@ -25,6 +29,7 @@ require_tool() {
   fi
 }
 
+# Used by snapshot-{create,refresh}.sh only. CLI wrappers don't need this.
 require_baseline_tools() {
   require_tool docker
   require_tool curl
@@ -34,10 +39,12 @@ require_baseline_tools() {
   require_tool dotnet
 }
 
+# Used by snapshot-{create,refresh}.sh only. CLI wrappers don't need this.
 compose() {
   docker compose -f "${COMPOSE_FILE}" "$@"
 }
 
+# Used by snapshot-{create,refresh}.sh only. CLI wrappers don't need this.
 wait_for_jellyfin() {
   local max_attempts=60
   local attempt=0
@@ -53,6 +60,7 @@ wait_for_jellyfin() {
   die "Jellyfin did not become ready within $((max_attempts * 2)) seconds."
 }
 
+# Used by snapshot-refresh.sh only. CLI wrappers don't need this.
 authenticate_admin() {
   # Echoes the AccessToken on stdout.
   local response
@@ -62,4 +70,13 @@ authenticate_admin() {
     -d "{\"Username\":\"${ADMIN_USERNAME}\",\"Pw\":\"${ADMIN_PASSWORD}\"}" \
     "${JELLYFIN_BASE_URL}/Users/AuthenticateByName")"
   jq -er '.AccessToken' <<<"$response"
+}
+
+# Build the CLI on first use so subsequent invocations can run --no-build for speed.
+run_test_env_cli() {
+  require_tool dotnet
+  if [[ ! -f "${TEST_ENV_DLL}" ]]; then
+    dotnet build "${TEST_ENV_PROJECT}/SSO-Auth.TestEnv.csproj" >/dev/null
+  fi
+  exec dotnet run --no-build --project "${TEST_ENV_PROJECT}" -- "$@"
 }
