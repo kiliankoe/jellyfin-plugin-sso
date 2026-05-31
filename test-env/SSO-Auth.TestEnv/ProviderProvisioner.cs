@@ -100,7 +100,49 @@ public sealed class ProviderProvisioner(EnvConfig config)
         }
 
         throw new OrchestrationException(
-            $"SSO plugin routes did not become available within {config.PluginReadyTimeoutSeconds} seconds.");
+            $"SSO plugin routes did not become available within {config.PluginReadyTimeoutSeconds} seconds."
+            + ReadJellyfinPluginLogTail());
+    }
+
+    /// <summary>
+    /// Best-effort: reads the most recent Jellyfin log from the bind-mounted config dir and returns the
+    /// plugin-relevant lines, so a route-wait timeout (which otherwise only says "404 for N seconds")
+    /// carries the actual plugin-load evidence — whether the SSO assembly loaded, whether the plugin was
+    /// registered, and any ABI/exception. Never throws; diagnostics must not mask the original failure.
+    /// </summary>
+    private string ReadJellyfinPluginLogTail()
+    {
+        try
+        {
+            var logDir = Path.Combine(config.JellyfinConfigDir, "log");
+            if (!Directory.Exists(logDir))
+            {
+                return $"\n(No Jellyfin log dir at {logDir}.)";
+            }
+
+            var newest = new DirectoryInfo(logDir)
+                .GetFiles("log_*.log")
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .FirstOrDefault();
+            if (newest is null)
+            {
+                return $"\n(No Jellyfin log files in {logDir}.)";
+            }
+
+            string[] keywords = { "plugin", "sso", "oidc", "abi", "controller", "error", "exception", "fail" };
+            var relevant = File.ReadLines(newest.FullName)
+                .Where(line => keywords.Any(k => line.Contains(k, StringComparison.OrdinalIgnoreCase)))
+                .TakeLast(40)
+                .ToArray();
+
+            return relevant.Length == 0
+                ? $"\n(No plugin-related lines in {newest.Name}.)"
+                : $"\n--- Jellyfin plugin log ({newest.Name}) ---\n{string.Join('\n', relevant)}";
+        }
+        catch (Exception ex)
+        {
+            return $"\n(Could not read Jellyfin log for diagnostics: {ex.Message})";
+        }
     }
 
     private async Task<string> AuthenticateAdminAsync(HttpClient http, CancellationToken ct)
