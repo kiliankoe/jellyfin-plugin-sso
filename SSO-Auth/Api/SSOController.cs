@@ -399,7 +399,7 @@ public class SSOController : ControllerBase
                 }
 
                 _logger.LogInformation($"Is request linking: {isLinking}");
-                return Content(WebResponse.Generator(data: state, provider: provider, baseUrl: GetRequestBase(config.SchemeOverride, config.PortOverride), mode: "OID"), MediaTypeNames.Text.Html);
+                return Content(WebResponse.Generator(data: state, provider: provider, baseUrl: GetRequestBase(config.SchemeOverride, config.PortOverride), mode: "OID", quickConnectCode: timedState.QuickConnectCode), MediaTypeNames.Text.Html);
             }
             else
             {
@@ -423,17 +423,18 @@ public class SSOController : ControllerBase
     /// </summary>
     /// <param name="provider">The name of the provider.</param>
     /// <param name="isLinking">Whether or not this request is to link accounts (Rather than authenticate).</param>
+    /// <param name="qc">Optional Jellyfin Quick Connect code to prefill after authentication.</param>
     /// <returns>An asynchronous result for the authentication.</returns>
     [HttpGet("OID/p/{provider}")]
     [HttpGet("OID/start/{provider}")]
-    public async Task<ActionResult> OidChallenge(string provider, [FromQuery] bool isLinking = false)
+    public async Task<ActionResult> OidChallenge(string provider, [FromQuery] bool isLinking = false, [FromQuery] string qc = null)
     {
         if (isLinking)
         {
             return BadRequest("Linking must be started from the authenticated SSO linking page.");
         }
 
-        return await StartOidChallenge(provider, false, null, false).ConfigureAwait(false);
+        return await StartOidChallenge(provider, false, null, false, qc).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -461,7 +462,7 @@ public class SSOController : ControllerBase
         return await StartOidChallenge(provider, true, jellyfinUserId, true).ConfigureAwait(false);
     }
 
-    private async Task<ActionResult> StartOidChallenge(string provider, bool isLinking, Guid? linkingUserId, bool returnStartUrl)
+    private async Task<ActionResult> StartOidChallenge(string provider, bool isLinking, Guid? linkingUserId, bool returnStartUrl, string quickConnectCode = null)
     {
         Invalidate();
         OidConfig config;
@@ -523,7 +524,8 @@ public class SSOController : ControllerBase
             {
                 IsLinking = isLinking,
                 LinkingUserId = linkingUserId,
-                Provider = provider
+                Provider = provider,
+                QuickConnectCode = quickConnectCode
             };
 
             if (!StateManager.TryAdd(state.State, timedState))
@@ -1722,6 +1724,11 @@ public class TimedAuthorizeState
     /// Gets or sets the OIDC provider that owns this authorization state.
     /// </summary>
     public string Provider { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Jellyfin Quick Connect code to prefill after authentication.
+    /// </summary>
+    public string QuickConnectCode { get; set; }
 
     /// <summary>
     /// Gets or sets the folders the user is allowed access to.
