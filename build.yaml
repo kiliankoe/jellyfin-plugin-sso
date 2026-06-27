@@ -1,7 +1,7 @@
 name: "SSO Authentication"
 guid: "505ce9d1-d916-42fa-86ca-673ef241d7df"
 imageUrl: "https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/main/img/logo.png"
-version: "4.0.0.7"
+version: "5.0.0.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 owner: "9p4"
@@ -15,6 +15,7 @@ artifacts:
   - "Duende.IdentityModel.OidcClient.dll"
   - "Duende.IdentityModel.dll"
 changelog: |
+  5.0.0.0: Overhaul the auth handoff so SSO login works in the native Jellyfin mobile apps (Android & iOS Expo), not just the web UI. Credentials are now built directly from the auth response and applied in the top frame instead of polling an iframed web client's localStorage, which never completed inside the native apps. Failures now surface an error instead of hanging on "Logging in...". Also fixes login when a canonical link points to a stale user GUID (#315).
   4.0.0.7: Fix and secure OIDC/SAML self-service account linking with authenticated, short-lived, single-use server-side transactions. Linking must now start from /SSOViews/linking; the legacy ?isLinking=true flow is no longer supported. Prevent identities linked to another Jellyfin account from being silently reassigned.
   4.0.0.6: Fix role-mapped permissions (admin, folders, Live TV) never being saved to the database on Jellyfin 10.11, which made them silently revert on every server restart (#367). PreserveAdminPermissions now defaults to false: admin status is synced strictly from roles unless explicitly opted in.
   4.0.0.5: Add PreserveAdminPermissions option (default true) so OIDC/SAML logins no longer silently revoke admin when role mapping doesn't match. Add diagnostic logging for admin role decisions.
