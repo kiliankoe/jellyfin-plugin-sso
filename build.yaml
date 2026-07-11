@@ -1,9 +1,9 @@
 name: "SSO Authentication"
 guid: "505ce9d1-d916-42fa-86ca-673ef241d7df"
 imageUrl: "https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/main/img/logo.png"
-version: "5.1.0.0"
-targetAbi: "10.11.0.0"
-framework: "net9.0"
+version: "6.0.0.0"
+targetAbi: "12.0.0.0"
+framework: "net10.0"
 owner: "9p4"
 overview: "Authenticate users against an SSO provider."
 description: |
@@ -20,6 +20,7 @@ artifacts:
   - "Microsoft.IdentityModel.Abstractions.dll"
   - "Microsoft.Bcl.Cryptography.dll"
 changelog: |
+  6.0.0.0: Jellyfin 12 support (net10.0, targetAbi 12.0.0.0), built against Jellyfin.Controller/Model 12.0.0-rc6.
   5.1.0.0: Consolidated fork release. OIDC identities are keyed on the sub claim, so a username change at the provider no longer breaks login or provisions a duplicate account (#146); links created before this are migrated on next login. Role mapping accepts multiple claim paths. The configured folder list now applies alongside folder roles instead of being ignored. A failed UserInfo request explains the Cloudflare Access workaround instead of erroring blankly. Dependencies refreshed and the vulnerable System.Security.Cryptography.Xml pin removed.
   5.0.0.2: Add OID device code flow authentication endpoint (POST /sso/OID/DeviceAuth/{provider}, RFC 8628).
   5.0.0.1: Restyle the sign-in handoff page to match Jellyfin: native MDL spinner with the status text centered beneath it, and errors shown in red instead of plain text. Themeable via CSS variables.
