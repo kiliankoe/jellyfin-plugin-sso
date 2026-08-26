@@ -30,6 +30,11 @@ https://user-images.githubusercontent.com/17993169/149681516-f93b43f5-fa5c-4c1f-
 
 Existing users may link new SSO accounts, or remove existing links using self-service at `/SSOViews/linking`.
 
+> [!NOTE]
+> The original project at [9p4/jellyfin-plugin-sso](https://github.com/9p4/jellyfin-plugin-sso)
+> was archived by its author. This is a consolidated fork that carries the fixes the
+> community forks made after the archive; see [Acknowledgements](#acknowledgements).
+
 ## Current State:
 
 This is 100% alpha software! PRs are welcome to improve the code.
@@ -282,7 +287,37 @@ This project uses Nix flakes to manage development dependencies. Run `nix develo
 
 ## Building
 
-This is built with .NET 6.0. Build with `dotnet publish .` for the debug release in the `SSO-Auth` directory. Copy over the `IdentityModel.OidcClient.dll`, the `IdentityModel.dll` and the `SSO-Auth.dll` files in the `/bin/Debug/net6.0/publish` directory to a new folder in your Jellyfin configuration: `config/plugins/sso`.
+This is built with .NET 9.0.
+
+```bash
+dotnet build SSO-Auth.sln --warnaserror   # CI builds warning-clean
+dotnet publish SSO-Auth/SSO-Auth.csproj -c Release -o out
+```
+
+To install a local build, copy the DLLs `build.yaml` lists under `artifacts` from `out/`
+into a new folder in your Jellyfin configuration: `config/plugins/sso`. That list is not
+cosmetic: Jellyfin does not provide those assemblies, so a missing one makes the plugin
+fail to load at runtime. After changing a dependency, re-check which published DLLs the
+server does not already ship.
+
+Jellyfin binds plugin assemblies by version, so `Jellyfin.Controller` and `Jellyfin.Model`
+track the _lowest_ 10.11 release that `targetAbi` promises to support, not the newest.
+
+## Testing
+
+`SSO-Auth.Tests/` holds integration tests that run the real login, linking and
+provisioning flows against a Jellyfin container and a [dex](https://dexidp.io/) identity
+provider, driven by Testcontainers. They need a working Docker daemon.
+
+```bash
+dotnet test SSO-Auth.Tests/SSO-Auth.Tests.csproj
+```
+
+If your Docker socket is not at the default path (Colima, OrbStack, rootless Docker), set
+`DOCKER_HOST` first, e.g. `export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"`.
+
+`test-env/` is the same stack as a scratch environment you can poke at by hand; see
+[test-env/README.md](test-env/README.md).
 
 ### VSCode Workflow
 
@@ -322,6 +357,28 @@ I use the [AspNet SAML](https://github.com/jitbit/AspNetSaml/) library for the S
 I use the [Duende IdentityModel OIDC Client](https://github.com/DuendeSoftware/foss) library for the OpenID side of things.
 
 Thanks to these projects, without which I would have been pulling my hair out implementing these protocols from scratch.
+
+## Acknowledgements
+
+After the original repository was archived, several people kept the plugin alive in their
+own forks. This fork is assembled from their work, with the original commits preserved:
+
+- [Buco7854/jellyfin-plugin-sso](https://github.com/Buco7854/jellyfin-plugin-sso) — the
+  account-linking security rework, and the fix for role-mapped permissions never being
+  written to the database on Jellyfin 10.11.
+- [MaxRink/jellyfin-plugin-sso](https://github.com/MaxRink/jellyfin-plugin-sso) —
+  consolidation of the wider fork ecosystem and the Jellyfin 12 port (kept on the
+  `jellyfin-12` branch here until Jellyfin 12 is released).
+- [AlexBocken](https://github.com/AlexBocken) — native mobile app support, the restyled
+  sign-in handoff page, and the stale-canonical-link fix.
+- [eddymoulton/jellyfin-plugin-oidc](https://github.com/eddymoulton/jellyfin-plugin-oidc) —
+  the integration test suite and the dex-backed test environment.
+- [dustinyschild](https://github.com/dustinyschild) — the OIDC device code flow endpoint.
+- [ZigZagT](https://github.com/ZigZagT) — multi-claim role mapping, the Cloudflare Access
+  UserInfo failure path, and honouring the configured folder list alongside folder roles.
+- [vanutp](https://github.com/vanutp) — keying OIDC identities on the `sub` claim.
+- [athendrix](https://github.com/athendrix) — new users no longer inherit access to every
+  library folder.
 
 ## Something funny about the origins of this plugin
 
