@@ -18,6 +18,8 @@ artifacts:
   - "Microsoft.IdentityModel.Tokens.dll"
   - "Microsoft.IdentityModel.Logging.dll"
   - "Microsoft.IdentityModel.Abstractions.dll"
+  - "Microsoft.Bcl.Memory.dll"
+  - "Microsoft.Bcl.Cryptography.dll"
 changelog: |
   5.0.0.2: Add OID device code flow authentication endpoint (POST /sso/OID/DeviceAuth/{provider}, RFC 8628).
   5.0.0.1: Restyle the sign-in handoff page to match Jellyfin: native MDL spinner with the status text centered beneath it, and errors shown in red instead of plain text. Themeable via CSS variables.
