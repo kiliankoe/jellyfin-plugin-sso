@@ -1,10 +1,19 @@
 {
-  inputs = { nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
 
   outputs = { self, nixpkgs }:
-    let pkgs = nixpkgs.legacyPackages.x86_64-linux;
+    let
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in {
-      devShell.x86_64-linux =
-        pkgs.mkShell { buildInputs = [ pkgs.nodePackages.prettier pkgs.dotnet-sdk_9 ]; };
-   };
+      devShells = forAllSystems (pkgs: {
+        default = pkgs.mkShell {
+          packages = [
+            pkgs.dotnet-sdk_9
+            pkgs.nodejs # for `npx prettier`, matching .github/workflows/prettier.yml
+            pkgs.zstd # test-env/scripts/*.sh unpack the Jellyfin snapshots
+          ];
+        };
+      });
+    };
 }
