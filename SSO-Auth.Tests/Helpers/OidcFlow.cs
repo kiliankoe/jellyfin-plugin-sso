@@ -28,7 +28,7 @@ public sealed class OidcFlow(string jellyfinBaseUrl, string providerName)
     };
     using var http = new HttpClient(handler);
 
-    var step1 = await Step1StartAsync(http, isLinking: false, ct);
+    var step1 = await Step1StartAsync(http, ct);
     if (step1.Denial is not null)
     {
       return step1.Denial;
@@ -63,43 +63,68 @@ public sealed class OidcFlow(string jellyfinBaseUrl, string providerName)
     };
     using var http = new HttpClient(handler);
 
-    // Warm-up: a fresh plugin state requires a non-linking /start/ hit first to flip
-    // `config.NewPath = true`. Without this, `OidChallenge(isLinking: true)` builds a
-    // /sso/OID/r/{provider} redirect URI that dex isn't configured to accept. See
-    // SSO-Auth/Api/SSOController.cs:378-382.
+    // Warm-up: a fresh plugin state needs one /start/ hit to flip `config.NewPath = true`.
+    // Without it the challenge builds a /sso/OID/r/{provider} redirect URI that dex is not
+    // configured to accept.
     using (var warmup = new HttpRequestMessage(
         HttpMethod.Get, $"{jellyfinBaseUrl}/sso/OID/start/{providerName}"))
     {
       using var _ = await http.SendAsync(warmup, ct);
     }
 
-    var step1 = await Step1StartAsync(http, isLinking: true, ct);
-    if (step1.Denial is not null)
+    var start = await StartLinkAsync(http, existingToken, ct);
+    if (start.Denial is not null)
     {
-      return step1.Denial;
+      return start.Denial;
     }
 
-    var step3Uri = await Step2DexAuthAsync(http, step1.DexAuthUri!, ct);
+    var step3Uri = await Step2DexAuthAsync(http, start.DexAuthUri!, ct);
     var loginUri = await Step3AuthLocalAsync(http, step3Uri, ct);
     var redirectUri = await Step4SubmitCredentialsAsync(http, loginUri, email, password, ct);
 
-    var step5 = await Step5PluginRedirectAsync(http, redirectUri, ct);
-    if (step5.Denial is not null)
+    // The link is created server-side inside the redirect handler, which then sends the
+    // browser back to the self-service linking page. There is no client-side link POST.
+    using var response = await http.GetAsync(redirectUri, ct);
+    if (response.StatusCode is not (HttpStatusCode.Found or HttpStatusCode.SeeOther))
     {
-      return step5.Denial;
+      return OidcLoginResult.Denied(response.StatusCode, await ReadAsync(response, ct));
     }
 
-    await SubmitLinkAsync(http, jellyfinUserId, existingToken, step5.StateToken!, ct);
-    return await Step6CompleteAuthAsync(http, step5.StateToken!, ct);
+    var location = response.Headers.Location?.ToString() ?? string.Empty;
+    if (!location.Contains("/SSOViews/linking", StringComparison.Ordinal))
+    {
+      return OidcLoginResult.Denied(response.StatusCode, $"unexpected redirect target: {location}");
+    }
+
+    return OidcLoginResult.Linked();
+  }
+
+  /// <summary>
+  /// Linking starts at the authenticated POST /sso/OID/StartLink/{provider}, which returns the
+  /// identity provider URL as text. The unauthenticated ?isLinking=true entry point was removed
+  /// because it let anyone open a linking transaction.
+  /// </summary>
+  private async Task<Step1Result> StartLinkAsync(HttpClient http, string existingToken, CancellationToken ct)
+  {
+    using var request = new HttpRequestMessage(
+        HttpMethod.Post, $"{jellyfinBaseUrl}/sso/OID/StartLink/{providerName}");
+    request.Headers.TryAddWithoutValidation("Authorization", $"MediaBrowser Token=\"{existingToken}\"");
+
+    using var response = await http.SendAsync(request, ct);
+    var body = await ReadAsync(response, ct);
+
+    if (!response.IsSuccessStatusCode)
+    {
+      return new Step1Result(null, OidcLoginResult.Denied(response.StatusCode, body));
+    }
+
+    return new Step1Result(new Uri(body.Trim()), null);
   }
 
   /// <summary>Step 1: GET /sso/OID/start/{provider} — expect 302 to dex.</summary>
-  private async Task<Step1Result> Step1StartAsync(HttpClient http, bool isLinking, CancellationToken ct)
+  private async Task<Step1Result> Step1StartAsync(HttpClient http, CancellationToken ct)
   {
-    var startUrl = isLinking
-        ? $"{jellyfinBaseUrl}/sso/OID/start/{providerName}?isLinking=true"
-        : $"{jellyfinBaseUrl}/sso/OID/start/{providerName}";
-    var response = await http.GetAsync(startUrl, ct);
+    var response = await http.GetAsync($"{jellyfinBaseUrl}/sso/OID/start/{providerName}", ct);
 
     if (response.StatusCode != HttpStatusCode.Found)
     {
@@ -174,43 +199,6 @@ public sealed class OidcFlow(string jellyfinBaseUrl, string providerName)
     return new Step5Result(match.Groups[1].Value, null);
   }
 
-  /// <summary>Linking-mode-only step: POST /sso/OID/Link/{provider}/{jellyfinUserId} with the linker's existing token.</summary>
-  private async Task SubmitLinkAsync(
-      HttpClient http,
-      Guid jellyfinUserId,
-      string existingToken,
-      string stateToken,
-      CancellationToken ct)
-  {
-    var payload = new
-    {
-      deviceId = "oidc-flow-test",
-      appName = "oidc-flow-test",
-      appVersion = "1.0.0",
-      deviceName = "oidc-flow-test",
-      data = stateToken,
-    };
-    var body = new StringContent(
-        JsonSerializer.Serialize(payload),
-        System.Text.Encoding.UTF8,
-        "application/json");
-
-    using var request = new HttpRequestMessage(
-        HttpMethod.Post,
-        $"{jellyfinBaseUrl}/sso/OID/Link/{providerName}/{jellyfinUserId}")
-    {
-      Content = body,
-    };
-    request.Headers.TryAddWithoutValidation("Authorization", $"MediaBrowser Token=\"{existingToken}\"");
-
-    using var response = await http.SendAsync(request, ct);
-    if (!response.IsSuccessStatusCode)
-    {
-      throw new InvalidOperationException(
-          $"Link POST returned {(int)response.StatusCode}. Body: {await ReadAsync(response, ct)}");
-    }
-  }
-
   /// <summary>Step 6: POST /sso/OID/Auth/{provider} with the state token to complete the session.</summary>
   private async Task<OidcLoginResult> Step6CompleteAuthAsync(HttpClient http, string stateToken, CancellationToken ct)
   {
@@ -269,6 +257,9 @@ public sealed record OidcLoginResult(
 
   public static OidcLoginResult Denied(HttpStatusCode statusCode, string body) =>
       new(false, null, null, statusCode, body);
+
+  /// <summary>A completed link: the server created the mapping, no session is handed back.</summary>
+  public static OidcLoginResult Linked() => new(true, null, null, null, null);
 }
 
 public sealed record JellyfinUser(string Id, string Name, bool IsAdministrator)

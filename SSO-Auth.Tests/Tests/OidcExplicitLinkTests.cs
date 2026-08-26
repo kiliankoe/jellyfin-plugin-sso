@@ -25,12 +25,16 @@ public class OidcExplicitLinkTests : IAsyncLifetime
     public async Task LinkFlow_LinksSsoIdentityToExistingLocalUser()
     {
         using var jf = new JellyfinClient(_fixture.JellyfinBaseUrl, _fixture.Config);
-        var adminToken = await jf.AuthenticateAdminAsync();
+        await jf.AuthenticateAdminAsync();
 
         var bob = await jf.CreateUserAsync("bob", "bob-password");
 
+        // Linking binds the SSO identity to whoever is authenticated, so it has to run as
+        // bob. An admin can no longer link an identity onto somebody else's account.
+        var bobToken = await jf.AuthenticateUserAsync("bob", "bob-password");
+
         var flow = new OidcFlow(_fixture.JellyfinBaseUrl, _fixture.ProviderName);
-        var linkResult = await flow.LinkAsync(bob.Id, adminToken, "user@test.local", "password");
+        var linkResult = await flow.LinkAsync(bob.Id, bobToken, "user@test.local", "password");
         Assert.True(linkResult.Succeeded, $"Link flow denied: {linkResult.DeniedBody}");
 
         var login = await flow.LoginAsync("user@test.local", "password");

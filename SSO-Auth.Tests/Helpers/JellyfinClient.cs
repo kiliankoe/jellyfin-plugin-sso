@@ -52,6 +52,27 @@ public sealed class JellyfinClient : IDisposable
     return _token;
   }
 
+  /// <summary>
+  /// Authenticates as an arbitrary user and returns their token, without disturbing the
+  /// admin token this client holds.
+  /// </summary>
+  public async Task<string> AuthenticateUserAsync(string username, string password, CancellationToken ct = default)
+  {
+    using var request = new HttpRequestMessage(HttpMethod.Post, "/Users/AuthenticateByName")
+    {
+      Content = JsonContent.Create(new { Username = username, Pw = password }),
+    };
+    request.Headers.TryAddWithoutValidation("Authorization", UnauthenticatedAuthHeader);
+
+    using var response = await _http.SendAsync(request, ct);
+    response.EnsureSuccessStatusCode();
+
+    var body = await response.Content.ReadAsStringAsync(ct);
+    using var doc = JsonDocument.Parse(body);
+    return doc.RootElement.GetProperty("AccessToken").GetString()
+        ?? throw new InvalidOperationException("AuthenticateByName response missing AccessToken.");
+  }
+
   public async Task<IReadOnlyList<JellyfinUserSummary>> ListUsersAsync(CancellationToken ct = default)
   {
     using var request = new HttpRequestMessage(HttpMethod.Get, "/Users");
