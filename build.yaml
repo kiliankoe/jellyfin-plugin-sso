@@ -18,7 +18,6 @@ artifacts:
   - "Microsoft.IdentityModel.Tokens.dll"
   - "Microsoft.IdentityModel.Logging.dll"
   - "Microsoft.IdentityModel.Abstractions.dll"
-  - "Microsoft.Bcl.Memory.dll"
   - "Microsoft.Bcl.Cryptography.dll"
 changelog: |
   5.0.0.2: Add OID device code flow authentication endpoint (POST /sso/OID/DeviceAuth/{provider}, RFC 8628).
