@@ -1399,7 +1399,7 @@ public class SSOController : ControllerBase
             {
                 _logger.LogWarning($"SSO canonical link for {canonicalName} points to missing user {userId}; removing stale link");
                 var staleLinks = GetCanonicalLinks(mode, provider);
-                staleLinks.Remove(canonicalName);
+                staleLinks.Remove(canonicalId);
                 UpdateCanonicalLinkConfig(staleLinks, mode, provider);
             }
         }
@@ -1453,14 +1453,47 @@ public class SSOController : ControllerBase
             CreateCanonicalLink(mode, provider, userId, canonicalId);
         }
 
+        MigrateLegacyUsernameLink(mode, provider, canonicalId, user);
+
         if (user.Username != canonicalName)
         {
             _logger.LogInformation($"SSO user {canonicalName} ({canonicalId}) has mismatched username {user.Username}, updating...");
-            user.Username = canonicalName;
-            await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
+            try
+            {
+                user.Username = canonicalName;
+                await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
+            }
+            catch (ArgumentException e)
+            {
+                // Jellyfin restricts which characters a username may contain. Keep the
+                // existing name and let the login proceed rather than locking the user out.
+                _logger.LogWarning(e, "Could not rename SSO user to {Username}; keeping the existing username", canonicalName);
+            }
         }
 
         return userId;
+    }
+
+    private void MigrateLegacyUsernameLink(string mode, string provider, string canonicalId, User user)
+    {
+        var links = GetCanonicalLinks(mode, provider);
+        var legacyKeys = links
+            .Where(link => link.Value == user.Id && !string.Equals(link.Key, canonicalId, StringComparison.Ordinal))
+            .Select(link => link.Key)
+            .ToList();
+
+        if (legacyKeys.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var legacyKey in legacyKeys)
+        {
+            _logger.LogInformation("Removing legacy username-keyed SSO link {LegacyKey} for user {UserId}", legacyKey, user.Id);
+            links.Remove(legacyKey);
+        }
+
+        UpdateCanonicalLinkConfig(links, mode, provider);
     }
 
     private Guid GetCanonicalLink(string mode, string provider, string canonicalId)
