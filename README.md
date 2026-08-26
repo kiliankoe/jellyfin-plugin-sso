@@ -35,6 +35,13 @@ Existing users may link new SSO accounts, or remove existing links using self-se
 > was archived by its author. This is a consolidated fork that carries the fixes the
 > community forks made after the archive; see [Acknowledgements](#acknowledgements).
 
+> [!WARNING]
+> This is the `jellyfin-12` branch: `net10.0`, plugin ABI `12.0.0.0`, built against a
+> Jellyfin 12 release candidate. It is parked here until Jellyfin 12 ships. Before
+> releasing from it, re-pin `Jellyfin.Controller`/`Jellyfin.Model` to the GA version and
+> re-check `build.yaml`'s `artifacts` against what a real Jellyfin 12 server provides —
+> a missing assembly there makes the plugin fail to load.
+
 ## Current State:
 
 This is 100% alpha software! PRs are welcome to improve the code.
