@@ -1471,22 +1471,6 @@ public class SSOController : ControllerBase
 
         MigrateLegacyUsernameLink(mode, provider, canonicalId, user);
 
-        if (user.Username != canonicalName)
-        {
-            _logger.LogInformation($"SSO user {canonicalName} ({canonicalId}) has mismatched username {user.Username}, updating...");
-            try
-            {
-                user.Username = canonicalName;
-                await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
-            }
-            catch (ArgumentException e)
-            {
-                // Jellyfin restricts which characters a username may contain. Keep the
-                // existing name and let the login proceed rather than locking the user out.
-                _logger.LogWarning(e, "Could not rename SSO user to {Username}; keeping the existing username", canonicalName);
-            }
-        }
-
         return userId;
     }
 
