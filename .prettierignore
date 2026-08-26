@@ -1,1 +1,6 @@
 *.min.js
+node_modules
+*.lock.json
+package-lock.json
+test-env/.data
+test-env/.publish

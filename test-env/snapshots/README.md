@@ -7,6 +7,7 @@ first-run wizard.
 ## Contents of a snapshot
 
 A snapshot contains:
+
 - Admin user `admin` / `admin` (Jellyfin local auth).
 - One library `Movies` pointed at `/media`.
 - Default Jellyfin configuration with the wizard marked complete.
@@ -21,9 +22,9 @@ reviewable in source.
 
 ## Inventory
 
-| Snapshot                       | Jellyfin version | Notes                          |
-|--------------------------------|------------------|--------------------------------|
-| `jellyfin-10.11.10.tar.zst`    | 10.11.10         | Baseline. Created via wizard.  |
+| Snapshot                    | Jellyfin version | Notes                         |
+| --------------------------- | ---------------- | ----------------------------- |
+| `jellyfin-10.11.10.tar.zst` | 10.11.10         | Baseline. Created via wizard. |
 
 ## Updating
 
