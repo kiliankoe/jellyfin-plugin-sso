@@ -36,11 +36,12 @@ Existing users may link new SSO accounts, or remove existing links using self-se
 > community forks made after the archive; see [Acknowledgements](#acknowledgements).
 
 > [!WARNING]
-> This is the `jellyfin-12` branch: `net10.0`, plugin ABI `12.0.0.0`, built against a
-> Jellyfin 12 release candidate. It is parked here until Jellyfin 12 ships. Before
-> releasing from it, re-pin `Jellyfin.Controller`/`Jellyfin.Model` to the GA version and
-> re-check `build.yaml`'s `artifacts` against what a real Jellyfin 12 server provides —
-> a missing assembly there makes the plugin fail to load.
+> This is the `jellyfin-12` branch: `net10.0`, plugin ABI `12.0.0.0`, built against the
+> Jellyfin 12.0 release packages. Jellyfin 12 disables the legacy `X-Emby-Authorization`
+> header and `api_key` query parameter by default, so the self-service linking page now
+> authenticates with the `Authorization: MediaBrowser` header and the API examples below
+> use `ApiKey`. Before a release, run the integration suite against the pinned Jellyfin 12
+> snapshot in `test-env/` (see [Testing](#testing)).
 
 ## Current State:
 
@@ -294,7 +295,7 @@ This project uses Nix flakes to manage development dependencies. Run `nix develo
 
 ## Building
 
-This is built with .NET 9.0.
+This is built with .NET 10.
 
 ```bash
 dotnet build SSO-Auth.sln --warnaserror   # CI builds warning-clean
