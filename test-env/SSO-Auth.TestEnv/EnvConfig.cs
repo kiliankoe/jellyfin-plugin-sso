@@ -85,7 +85,7 @@ public sealed record EnvConfig
             DataDir = Path.Combine(testEnvDir, ".data"),
             SnapshotsDir = Path.Combine(testEnvDir, "snapshots"),
             SeedDir = Path.Combine(testEnvDir, "seed"),
-            JellyfinVersion = ResolveDotEnvValue(testEnvDir, "JELLYFIN_VERSION", "10.11.10"),
+            JellyfinVersion = ResolveDotEnvValue(testEnvDir, "JELLYFIN_VERSION", "12.0"),
             DexVersion = ResolveDotEnvValue(testEnvDir, "DEX_VERSION", "v2.45.1"),
             JellyfinContainerName = "jellyfin-sso-test",
             DexContainerName = "dex-sso-test",
