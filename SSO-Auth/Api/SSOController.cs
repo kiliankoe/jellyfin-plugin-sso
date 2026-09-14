@@ -1514,19 +1514,17 @@ public class SSOController : ControllerBase
             user.Password = _cryptoProvider.CreatePasswordHash(Convert.ToBase64String(RandomNumberGenerator.GetBytes(64))).ToString();
             await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
 
-            if (settings.EnableAuthorization)
-            {
-                // Strip Jellyfin's default library permissions exactly once, on creation. With
-                // authorization enabled the provider's roles decide access, so start from none as
-                // the config text promises. With it disabled the plugin does not manage permissions
-                // and Jellyfin's own defaults stand. Persist via UpdatePolicyAsync (Jellyfin
-                // 10.11+/12 no longer save permissions through UpdateUserAsync, jellyfin/jellyfin#16298).
-                var newUserPolicy = _userManager.GetUserDto(user).Policy;
-                newUserPolicy.EnableAllFolders = false;
-                newUserPolicy.EnabledFolders = Array.Empty<Guid>();
-                await _userManager.UpdatePolicyAsync(user.Id, newUserPolicy).ConfigureAwait(false);
-                user = _userManager.GetUserById(user.Id);
-            }
+            // Strip Jellyfin's default library permissions exactly once, on creation, whether or
+            // not the provider authorizes: a new SSO user must not inherit access to every folder.
+            // Either the provider's role mapping sets their folders below, or an administrator
+            // grants access by hand, as the config text promises. Persist via UpdatePolicyAsync
+            // (Jellyfin 10.11+/12 no longer save permissions through UpdateUserAsync,
+            // jellyfin/jellyfin#16298).
+            var newUserPolicy = _userManager.GetUserDto(user).Policy;
+            newUserPolicy.EnableAllFolders = false;
+            newUserPolicy.EnabledFolders = Array.Empty<Guid>();
+            await _userManager.UpdatePolicyAsync(user.Id, newUserPolicy).ConfigureAwait(false);
+            user = _userManager.GetUserById(user.Id);
 
             // Make sure there aren't any trailing existing links
             var links = GetCanonicalLinks(mode, provider);
