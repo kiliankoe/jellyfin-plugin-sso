@@ -780,7 +780,7 @@ public class SSOController : ControllerBase
 
         try
         {
-            using var httpClient = _httpClientFactory.CreateClient();
+            using var httpClient = CreatePluginHttpClient();
 
             // Fetch OIDC discovery document to get issuer and JWKS URI
             var discoveryUrl = config.OidEndpoint?.Trim().TrimEnd('/') + "/.well-known/openid-configuration";
