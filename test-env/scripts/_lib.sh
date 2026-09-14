@@ -50,7 +50,11 @@ wait_for_jellyfin() {
   local attempt=0
   log "Waiting for Jellyfin to respond on ${JELLYFIN_BASE_URL} ..."
   while (( attempt < max_attempts )); do
-    if curl -sf -o /dev/null "${JELLYFIN_BASE_URL}/System/Info/Public"; then
+    # Jellyfin 12 answers this route from a bootstrap host while database migrations run,
+    # with camelCase JSON and StartupWizardCompleted=false. Only the real pipeline emits
+    # PascalCase, so require it before declaring the server up.
+    if curl -sf "${JELLYFIN_BASE_URL}/System/Info/Public" 2>/dev/null \
+      | jq -e '.ProductName == "Jellyfin Server"' > /dev/null 2>&1; then
       log "Jellyfin is up."
       return 0
     fi

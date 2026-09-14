@@ -158,7 +158,11 @@ public sealed class ContainerStack(EnvConfig config)
             try
             {
                 var response = await http.GetAsync($"{config.JellyfinBaseUrl}/System/Info/Public", ct);
-                if (response.IsSuccessStatusCode)
+                // Jellyfin 12 serves this route from a bootstrap host while database migrations run,
+                // with camelCase JSON and StartupWizardCompleted=false. Only the real pipeline emits
+                // PascalCase, so require that before declaring the server up.
+                if (response.IsSuccessStatusCode
+                    && (await response.Content.ReadAsStringAsync(ct)).Contains("\"ProductName\"", StringComparison.Ordinal))
                 {
                     Console.Out.WriteLine("[+] Jellyfin is up.");
                     return;
