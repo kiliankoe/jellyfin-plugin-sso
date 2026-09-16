@@ -35,13 +35,13 @@ Existing users may link new SSO accounts, or remove existing links using self-se
 > was archived by its author. This is a consolidated fork that carries the fixes the
 > community forks made after the archive; see [Acknowledgements](#acknowledgements).
 
-> [!WARNING]
-> This is the `jellyfin-12` branch: `net10.0`, plugin ABI `12.0.0.0`, built against the
-> Jellyfin 12.0 release packages. Jellyfin 12 disables the legacy `X-Emby-Authorization`
-> header and `api_key` query parameter by default, so the self-service linking page now
-> authenticates with the `Authorization: MediaBrowser` header and the API examples below
-> use `ApiKey`. Before a release, run the integration suite against the pinned Jellyfin 12
-> snapshot in `test-env/` (see [Testing](#testing)).
+> [!IMPORTANT]
+> From 6.0.0.0 this plugin targets Jellyfin 12 (`net10.0`, plugin ABI `12.0.0.0`).
+> 5.1.0.0 is the last release for Jellyfin 10.11. Jellyfin 12 disables the legacy
+> `X-Emby-Authorization` header and `api_key` query parameter by default, so the
+> self-service linking page authenticates with the `Authorization: MediaBrowser` header
+> and the API examples below use `ApiKey`. The integration suite in `test-env/` runs
+> against a pinned Jellyfin 12 snapshot (see [Testing](#testing)).
 
 ## Current State:
 
@@ -372,11 +372,19 @@ After the original repository was archived, several people kept the plugin alive
 own forks. This fork is assembled from their work, with the original commits preserved:
 
 - [Buco7854/jellyfin-plugin-sso](https://github.com/Buco7854/jellyfin-plugin-sso) — the
-  account-linking security rework, and the fix for role-mapped permissions never being
-  written to the database on Jellyfin 10.11.
+  account-linking security rework, the fix for role-mapped permissions never being
+  written to the database on Jellyfin 10.11, and the Jellyfin 12 work: the linking page's
+  move off the archived JS API client, routing provider requests through Jellyfin's HTTP
+  client, and aligning the package name so superseded versions are removed on upgrade.
 - [MaxRink/jellyfin-plugin-sso](https://github.com/MaxRink/jellyfin-plugin-sso) —
-  consolidation of the wider fork ecosystem and the Jellyfin 12 port (kept on the
-  `jellyfin-12` branch here until Jellyfin 12 is released).
+  consolidation of the wider fork ecosystem, the Jellyfin 12 port, and the fixes
+  harvested from the forks below.
+- [dangerouslaser](https://github.com/dangerouslaser) — keeping pre-existing accounts on
+  their own authentication provider.
+- [derSoerrn95](https://github.com/derSoerrn95) — the option to refuse adopting unlinked
+  local accounts by username, warnings for disabled discovery trust checks, the running
+  server version on SSO sessions, and the avatar download fixes.
+- [michaelkuty](https://github.com/michaelkuty) — role names as JSON object keys (Zitadel).
 - [AlexBocken](https://github.com/AlexBocken) — native mobile app support, the restyled
   sign-in handoff page, and the stale-canonical-link fix.
 - [eddymoulton/jellyfin-plugin-oidc](https://github.com/eddymoulton/jellyfin-plugin-oidc) —
