@@ -22,9 +22,10 @@ reviewable in source.
 
 ## Inventory
 
-| Snapshot                    | Jellyfin version | Notes                         |
-| --------------------------- | ---------------- | ----------------------------- |
-| `jellyfin-10.11.10.tar.zst` | 10.11.10         | Baseline. Created via wizard. |
+| Snapshot                    | Jellyfin version | Notes                                                                                                     |
+| --------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------- |
+| `jellyfin-10.11.10.tar.zst` | 10.11.10         | Baseline. Created via wizard.                                                                             |
+| `jellyfin-12.0.tar.zst`     | 12.0             | Migrated from 10.11.10 via `snapshot-refresh.sh`. Legacy authorization is disabled by the 12.0 migration. |
 
 ## Updating
 

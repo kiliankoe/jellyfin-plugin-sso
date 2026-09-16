@@ -86,6 +86,13 @@ public class SamlConfig
     public bool PreserveAdminPermissions { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether a first login for an unlinked identity may adopt
+    /// an existing local Jellyfin account of the same username. When true, such logins are
+    /// refused until the account is linked from the self-service page.
+    /// </summary>
+    public bool DisableUsernameAccountAdoption { get; set; }
+
+    /// <summary>
     /// Gets or sets what roles are checked to determine whether the user is allowed to use Jellyfin.
     /// </summary>
     public string[] Roles { get; set; }
@@ -153,15 +160,9 @@ public class SamlConfig
     [XmlElement("CanonicalLinks")]
     public SerializableDictionary<string, Guid> CanonicalLinks
     {
-        get
-        {
-            if (_canonicalLinks == null)
-            {
-                return new SerializableDictionary<string, Guid>();
-            }
-
-            return _canonicalLinks;
-        }
+        // Assigned rather than returned: handing out a throwaway dictionary would silently drop
+        // whatever the caller writes into it.
+        get => _canonicalLinks ??= new SerializableDictionary<string, Guid>();
         set => _canonicalLinks = value;
     }
 }
@@ -219,6 +220,13 @@ public class OidConfig
     /// admin role matches. When false (default), admin status is synced strictly from roles.
     /// </summary>
     public bool PreserveAdminPermissions { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a first login for an unlinked identity may adopt
+    /// an existing local Jellyfin account of the same username. When true, such logins are
+    /// refused until the account is linked from the self-service page.
+    /// </summary>
+    public bool DisableUsernameAccountAdoption { get; set; }
 
     /// <summary>
     /// Gets or sets what roles are checked to determine whether the user is allowed to use Jellyfin.
@@ -298,15 +306,9 @@ public class OidConfig
     [XmlElement("CanonicalLinks")]
     public SerializableDictionary<string, Guid> CanonicalLinks
     {
-        get
-        {
-            if (_canonicalLinks == null)
-            {
-                return new SerializableDictionary<string, Guid>();
-            }
-
-            return _canonicalLinks;
-        }
+        // Assigned rather than returned: handing out a throwaway dictionary would silently drop
+        // whatever the caller writes into it.
+        get => _canonicalLinks ??= new SerializableDictionary<string, Guid>();
         set => _canonicalLinks = value;
     }
 

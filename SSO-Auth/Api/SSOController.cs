@@ -17,6 +17,7 @@ using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.SSO_Auth.Config;
 using Jellyfin.Plugin.SSO_Auth.Helpers;
 using MediaBrowser.Common.Api;
+using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Authentication;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
@@ -43,6 +44,7 @@ namespace Jellyfin.Plugin.SSO_Auth.Api;
 public class SSOController : ControllerBase
 {
     private const string SamlLinkStatePrefix = "link:";
+    private const string UsernameTakenMessage = "A Jellyfin account with this username already exists and is not linked to this provider. Link it from the account linking page, or allow username account adoption for this provider.";
     private readonly IUserManager _userManager;
     private readonly ISessionManager _sessionManager;
     private readonly IAuthorizationContext _authContext;
@@ -153,21 +155,15 @@ public class SSOController : ControllerBase
                 DisablePushedAuthorization = config.DisablePushedAuthorization,
                 LoggerFactory = _loggerFactory,
                 LoadProfile = !config.DoNotLoadProfile,
-                HttpClientFactory = o =>
-                {
-                    var client = _httpClientFactory.CreateClient();
-                    System.Reflection.Assembly assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                    System.Diagnostics.FileVersionInfo fvi = System.Diagnostics.FileVersionInfo.GetVersionInfo(assembly.Location);
-                    string version = fvi.FileVersion;
-                    client.DefaultRequestHeaders.UserAgent.ParseAdd($"Jellyfin-Plugin-SSO-Auth +{version} (https://github.com/9p4/jellyfin-plugin-sso)");
-                    return client;
-                }
+                HttpClientFactory = CreateOidcHttpClient
             };
             var oidEndpointUri = new Uri(config.OidEndpoint?.Trim());
             options.Policy.Discovery.AdditionalEndpointBaseAddresses.Add(oidEndpointUri.GetLeftPart(UriPartial.Authority));
             options.Policy.Discovery.ValidateEndpoints = !config.DoNotValidateEndpoints; // For Google and other providers with different endpoints
             options.Policy.Discovery.RequireHttps = !config.DisableHttps;
             options.Policy.Discovery.ValidateIssuerName = !config.DoNotValidateIssuerName;
+
+            WarnAboutRelaxedDiscovery(config);
             var oidcClient = new OidcClient(options);
             var currentState = timedState.State;
             LoginResult result;
@@ -181,6 +177,22 @@ public class SSOController : ControllerBase
                 return ReturnError(
                     StatusCodes.Status400BadRequest,
                     "The OIDC UserInfo response could not be parsed. Cloudflare Access users must enable 'Skip OIDC UserInfo Request' in this provider's settings.");
+            }
+            catch (TaskCanceledException ex)
+            {
+                StateManager.TryRemove(state, out _);
+                _logger.LogError(
+                    ex,
+                    "OpenID callback processing timed out for provider {Provider} after {TimeoutSeconds} seconds. A discovery, signing-key, token, or user-info request did not complete.",
+                    provider,
+                    options.BackchannelTimeout.TotalSeconds);
+                return ReturnError(StatusCodes.Status504GatewayTimeout, "Timed out contacting the OpenID provider while completing login. Check the Jellyfin logs.");
+            }
+            catch (HttpRequestException ex)
+            {
+                StateManager.TryRemove(state, out _);
+                _logger.LogError(ex, "OpenID callback processing failed for provider {Provider}.", provider);
+                return ReturnError(StatusCodes.Status502BadGateway, "Could not contact the OpenID provider while completing login. Check the Jellyfin logs.");
             }
 
             if (result.IsError)
@@ -402,6 +414,24 @@ public class SSOController : ControllerBase
     {
         if (segments.Length == 1)
         {
+            // Providers such as Zitadel encode roles as the keys of a JSON object,
+            // e.g. {"jellyfin_admin": {"org_id": "org_domain"}, "jellyfin_user": {...}}.
+            if (claim.Value.TrimStart().StartsWith('{'))
+            {
+                try
+                {
+                    var keys = JsonConvert.DeserializeObject<IDictionary<string, object>>(claim.Value)?.Keys.ToList();
+                    if (keys is not null)
+                    {
+                        return keys;
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Not JSON after all: treat the raw value as a single role below.
+                }
+            }
+
             return new List<string> { claim.Value };
         }
 
@@ -427,12 +457,17 @@ public class SSOController : ControllerBase
             }
         }
 
-        if (!json.TryGetValue(segments[^1], out var rolesToken) || rolesToken is not JArray rolesArray)
+        if (!json.TryGetValue(segments[^1], out var rolesToken))
         {
             return new List<string>();
         }
 
-        return rolesArray.ToObject<List<string>>() ?? new List<string>();
+        return rolesToken switch
+        {
+            JArray rolesArray => rolesArray.ToObject<List<string>>() ?? new List<string>(),
+            JObject rolesObject => rolesObject.Properties().Select(p => p.Name).ToList(),
+            _ => new List<string>(),
+        };
     }
 
     /// <summary>
@@ -513,27 +548,54 @@ public class SSOController : ControllerBase
                 DisablePushedAuthorization = config.DisablePushedAuthorization,
                 LoggerFactory = _loggerFactory,
                 LoadProfile = !config.DoNotLoadProfile,
-                HttpClientFactory = o =>
-                {
-                    var client = _httpClientFactory.CreateClient();
-                    System.Reflection.Assembly assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                    System.Diagnostics.FileVersionInfo fvi = System.Diagnostics.FileVersionInfo.GetVersionInfo(assembly.Location);
-                    string version = fvi.FileVersion;
-
-                    client.DefaultRequestHeaders.UserAgent.ParseAdd($"Jellyfin-Plugin-SSO-Auth +{version} (https://github.com/9p4/jellyfin-plugin-sso)");
-                    return client;
-                }
+                HttpClientFactory = CreateOidcHttpClient
             };
             var oidEndpointUri = new Uri(config.OidEndpoint?.Trim());
             options.Policy.Discovery.AdditionalEndpointBaseAddresses.Add(oidEndpointUri.GetLeftPart(UriPartial.Authority));
             options.Policy.Discovery.ValidateEndpoints = !config.DoNotValidateEndpoints; // For Google and other providers with different endpoints
             options.Policy.Discovery.RequireHttps = !config.DisableHttps;
             options.Policy.Discovery.ValidateIssuerName = !config.DoNotValidateIssuerName;
+
+            WarnAboutRelaxedDiscovery(config);
             var oidcClient = new OidcClient(options);
-            var state = await oidcClient.PrepareLoginAsync().ConfigureAwait(false);
+            string discoveryEndpoint = GetDiscoveryEndpointForLog(options.Authority);
+            _logger.LogDebug(
+                "Preparing OpenID login for provider {Provider}. Discovery endpoint: {DiscoveryEndpoint}",
+                provider,
+                discoveryEndpoint);
+
+            AuthorizeState state;
+            try
+            {
+                state = await oidcClient.PrepareLoginAsync().ConfigureAwait(false);
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "OpenID login preparation timed out for provider {Provider} after {TimeoutSeconds} seconds. Discovery endpoint: {DiscoveryEndpoint}. The provider signing-key endpoint may also have been requested.",
+                    provider,
+                    options.BackchannelTimeout.TotalSeconds,
+                    discoveryEndpoint);
+                return ReturnError(StatusCodes.Status504GatewayTimeout, "Timed out contacting the OpenID provider while preparing login. Check the Jellyfin logs.");
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "OpenID login preparation failed for provider {Provider}. Discovery endpoint: {DiscoveryEndpoint}",
+                    provider,
+                    discoveryEndpoint);
+                return ReturnError(StatusCodes.Status502BadGateway, "Could not contact the OpenID provider while preparing login. Check the Jellyfin logs.");
+            }
 
             if (state.IsError)
             {
+                _logger.LogError(
+                    "OpenID login preparation failed for provider {Provider}: {Error} - {ErrorDescription}",
+                    provider,
+                    state.Error,
+                    state.ErrorDescription);
                 return ReturnError(StatusCodes.Status400BadRequest, $"Error preparing login: {state.Error} - {state.ErrorDescription}");
             }
 
@@ -659,10 +721,14 @@ public class SSOController : ControllerBase
             && string.Equals(pendingState.Provider, provider, StringComparison.Ordinal)
             && StateManager.TryRemove(response.Data, out var timedState))
         {
-            Guid userId = await CreateCanonicalLinkAndUserIfNotExist("oid", provider, timedState.Id, timedState.Username);
+            Guid? userId = await CreateCanonicalLinkAndUserIfNotExist("oid", provider, timedState.Id, timedState.Username);
+            if (userId is null)
+            {
+                return Conflict(UsernameTakenMessage);
+            }
 
             var authenticationResult = await Authenticate(
-                userId,
+                userId.Value,
                 timedState.Admin,
                 config.EnableAuthorization,
                 config.EnableAllFolders,
@@ -714,7 +780,7 @@ public class SSOController : ControllerBase
 
         try
         {
-            using var httpClient = _httpClientFactory.CreateClient();
+            using var httpClient = CreatePluginHttpClient();
 
             // Fetch OIDC discovery document to get issuer and JWKS URI
             var discoveryUrl = config.OidEndpoint?.Trim().TrimEnd('/') + "/.well-known/openid-configuration";
@@ -760,15 +826,10 @@ public class SSOController : ControllerBase
             string subject = null;
             bool valid = false;
             bool isAdmin = false;
-            var folders = new List<string>();
+            var folders = config.EnabledFolders != null ? new HashSet<string>(config.EnabledFolders) : new HashSet<string>();
             bool enableLiveTv = config.EnableLiveTv;
             bool enableLiveTvManagement = config.EnableLiveTvManagement;
             string avatarUrl = null;
-
-            if (!config.EnableFolderRoles && config.EnabledFolders != null)
-            {
-                folders = new List<string>(config.EnabledFolders);
-            }
 
             if (config.AvatarUrlFormat is not null)
             {
@@ -777,14 +838,7 @@ public class SSOController : ControllerBase
                     (s, claim) => s.Contains($"@{{{claim.Type}}}") ? s.Replace($"@{{{claim.Type}}}", claim.Value) : s);
             }
 
-            string[] segments = string.IsNullOrEmpty(config.RoleClaim)
-                ? Array.Empty<string>()
-                : Regex.Split(config.RoleClaim.Trim(), "(?<!\\\\)\\.");
-
-            if (segments.Any())
-            {
-                segments = segments.Select(i => i.Replace("\\.", ".")).ToArray();
-            }
+            var roleClaimPaths = ParseRoleClaimPaths(config.RoleClaim).ToArray();
 
             foreach (var claim in claims)
             {
@@ -802,50 +856,14 @@ public class SSOController : ControllerBase
                     subject = claim.Value;
                 }
 
-                if (segments.Any() && claim.Type == segments[0])
+                foreach (var roleClaimPath in roleClaimPaths)
                 {
-                    List<string> roles;
-                    if (segments.Length == 1)
+                    if (claim.Type != roleClaimPath[0])
                     {
-                        roles = new List<string> { claim.Value };
+                        continue;
                     }
-                    else
-                    {
-                        var json = JsonConvert.DeserializeObject<IDictionary<string, object>>(claim.Value);
-                        if (json is null)
-                        {
-                            roles = new List<string>();
-                        }
-                        else
-                        {
-                            bool missingSegment = false;
-                            for (int i = 1; i < segments.Length - 1; i++)
-                            {
-                                var segment = segments[i];
-                                if (!json.TryGetValue(segment, out var nextToken) || nextToken is not JObject nextObject)
-                                {
-                                    missingSegment = true;
-                                    break;
-                                }
 
-                                json = nextObject.ToObject<IDictionary<string, object>>();
-                                if (json is null)
-                                {
-                                    missingSegment = true;
-                                    break;
-                                }
-                            }
-
-                            if (missingSegment || !json.TryGetValue(segments[^1], out var rolesToken) || rolesToken is not JArray rolesArray)
-                            {
-                                roles = new List<string>();
-                            }
-                            else
-                            {
-                                roles = rolesArray.ToObject<List<string>>();
-                            }
-                        }
-                    }
+                    List<string> roles = GetRolesFromClaimPath(claim, roleClaimPath);
 
                     foreach (string role in roles)
                     {
@@ -877,7 +895,7 @@ public class SSOController : ControllerBase
                             {
                                 if (role.Equals(folderRoleMap.Role?.Trim()))
                                 {
-                                    folders.AddRange(folderRoleMap.Folders);
+                                    folders.UnionWith(folderRoleMap.Folders);
                                 }
                             }
                         }
@@ -939,8 +957,13 @@ public class SSOController : ControllerBase
             };
 
             var userId = await CreateCanonicalLinkAndUserIfNotExist("oid", provider, subject, username).ConfigureAwait(false);
+            if (userId is null)
+            {
+                return Conflict(UsernameTakenMessage);
+            }
+
             var authenticationResult = await Authenticate(
-                userId,
+                userId.Value,
                 isAdmin,
                 config.EnableAuthorization,
                 config.EnableAllFolders,
@@ -1325,10 +1348,14 @@ public class SSOController : ControllerBase
                 }
             }
 
-            Guid userId = await CreateCanonicalLinkAndUserIfNotExist("saml", provider, samlResponse.GetNameID(), samlResponse.GetNameID());
+            Guid? userId = await CreateCanonicalLinkAndUserIfNotExist("saml", provider, samlResponse.GetNameID(), samlResponse.GetNameID());
+            if (userId is null)
+            {
+                return Conflict(UsernameTakenMessage);
+            }
 
             var authenticationResult = await Authenticate(
-                userId,
+                userId.Value,
                 isAdmin,
                 config.EnableAuthorization,
                 config.EnableAllFolders,
@@ -1387,8 +1414,20 @@ public class SSOController : ControllerBase
         return links;
     }
 
-    private async Task<Guid> CreateCanonicalLinkAndUserIfNotExist(string mode, string provider, string canonicalId, string canonicalName)
+    /// <summary>
+    /// Resolves (or provisions) the Jellyfin user for a provider identity.
+    /// </summary>
+    /// <param name="mode">The mode of the function; SAML or OID.</param>
+    /// <param name="provider">The provider the identity belongs to.</param>
+    /// <param name="canonicalId">The provider's stable identifier for the identity (OIDC sub, SAML NameID).</param>
+    /// <param name="canonicalName">The username the provider reports for the identity.</param>
+    /// <returns>
+    /// The Jellyfin user id, or null when the username is already taken by a local account
+    /// this provider is not allowed to adopt.
+    /// </returns>
+    private async Task<Guid?> CreateCanonicalLinkAndUserIfNotExist(string mode, string provider, string canonicalId, string canonicalName)
     {
+        var settings = GetProvisioningSettings(mode, provider);
         User user = null;
 
         // First try to get the user by its id in case it was already registered before
@@ -1420,26 +1459,67 @@ public class SSOController : ControllerBase
             }
         }
 
-        // No (valid) userId found? Let's try and find the user by name instead.
+        // Releases before 6.0 keyed links by username. Honour such a link so nobody loses
+        // their account on upgrade; MigrateLegacyUsernameLink rekeys it below.
+        if (user == null && !string.Equals(canonicalId, canonicalName, StringComparison.Ordinal))
+        {
+            try
+            {
+                user = _userManager.GetUserById(GetCanonicalLink(mode, provider, canonicalName));
+            }
+            catch (KeyNotFoundException)
+            {
+                user = null;
+            }
+        }
+
+        // No (valid) link found? Adopt the local account of the same name, unless the
+        // provider is configured not to: adoption hands whoever controls the username claim
+        // any local account of that name, administrators included.
         if (user == null)
         {
-            user = _userManager.GetUserByName(canonicalName);
+            var existing = _userManager.GetUserByName(canonicalName);
+            if (existing != null)
+            {
+                if (settings.DisableUsernameAccountAdoption)
+                {
+                    _logger.LogWarning(
+                        "Refusing the login for {Username} on {Provider}: a local account of that name exists but is not linked to this provider, and username account adoption is disabled",
+                        canonicalName,
+                        provider);
+                    return null;
+                }
+
+                _logger.LogWarning(
+                    "Adopting existing local account {Username} for a first login on {Provider}; the provider's username claim is authoritative for this provider",
+                    canonicalName,
+                    provider);
+                user = existing;
+            }
         }
 
         if (user == null)
         {
             _logger.LogInformation($"SSO user {canonicalName} ({canonicalId}) doesn't exist, creating...");
             user = await _userManager.CreateUserAsync(canonicalName).ConfigureAwait(false);
-            user.AuthenticationProviderId = GetType().FullName;
+
+            // DefaultProvider, when configured, names the provider that should own plugin-created
+            // accounts from the start (e.g. an LDAP plugin); otherwise the id is this plugin,
+            // which is not a real authentication provider, so password attempts fall through to
+            // Default and meet the random password below.
+            user.AuthenticationProviderId = string.IsNullOrWhiteSpace(settings.DefaultProvider)
+                ? GetType().FullName
+                : settings.DefaultProvider.Trim();
             // https://jonathancrozier.com/blog/how-to-generate-a-cryptographically-secure-random-string-in-dot-net-with-c-sharp
             user.Password = _cryptoProvider.CreatePasswordHash(Convert.ToBase64String(RandomNumberGenerator.GetBytes(64))).ToString();
             await _userManager.UpdateUserAsync(user).ConfigureAwait(false);
 
-            // Strip Jellyfin's default library permissions exactly once, on creation. New SSO
-            // users must not inherit access to every folder: either the provider's role mapping
-            // will set their folders below, or they default to none as the config text promises.
-            // Persist via UpdatePolicyAsync (Jellyfin 10.11+/12 no longer save permissions through
-            // UpdateUserAsync, jellyfin/jellyfin#16298).
+            // Strip Jellyfin's default library permissions exactly once, on creation, whether or
+            // not the provider authorizes: a new SSO user must not inherit access to every folder.
+            // Either the provider's role mapping sets their folders below, or an administrator
+            // grants access by hand, as the config text promises. Persist via UpdatePolicyAsync
+            // (Jellyfin 10.11+/12 no longer save permissions through UpdateUserAsync,
+            // jellyfin/jellyfin#16298).
             var newUserPolicy = _userManager.GetUserDto(user).Policy;
             newUserPolicy.EnableAllFolders = false;
             newUserPolicy.EnabledFolders = Array.Empty<Guid>();
@@ -1472,6 +1552,21 @@ public class SSOController : ControllerBase
         MigrateLegacyUsernameLink(mode, provider, canonicalId, user);
 
         return userId;
+    }
+
+    private static (bool EnableAuthorization, string DefaultProvider, bool DisableUsernameAccountAdoption) GetProvisioningSettings(string mode, string provider)
+    {
+        switch (mode)
+        {
+            case "oid":
+                var oid = SSOPlugin.Instance.Configuration.OidConfigs[provider];
+                return (oid.EnableAuthorization, oid.DefaultProvider, oid.DisableUsernameAccountAdoption);
+            case "saml":
+                var saml = SSOPlugin.Instance.Configuration.SamlConfigs[provider];
+                return (saml.EnableAuthorization, saml.DefaultProvider, saml.DisableUsernameAccountAdoption);
+            default:
+                throw new ArgumentException($"{mode} is not a valid choice between 'saml' and 'oid'");
+        }
     }
 
     private void MigrateLegacyUsernameLink(string mode, string provider, string canonicalId, User user)
@@ -1551,14 +1646,17 @@ public class SSOController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, "Current user is not allowed to unlink SSO providers for user ID.");
         }
 
-        Guid linkedId = GetCanonicalLink(mode, provider, canonicalName);
+        var links = GetCanonicalLinks(mode, provider);
+
+        if (!links.TryGetValue(canonicalName, out var linkedId))
+        {
+            return NotFound("No link is registered for that canonical name.");
+        }
 
         if (linkedId != jellyfinUserId)
         {
             return StatusCode(StatusCodes.Status409Conflict, "jellyfin UID does not match id registered to that canonical name.");
         }
-
-        var links = GetCanonicalLinks(mode, provider);
 
         links.Remove(canonicalName);
 
@@ -1816,7 +1914,11 @@ public class SSOController : ControllerBase
         policy.EnableLiveTvAccess = enableLiveTv;
         policy.EnableLiveTvManagement = enableLiveTvAdmin;
 
-        if (!string.IsNullOrEmpty(defaultProvider))
+        // Only migrate accounts this plugin owns: reassigning unconditionally would hijack
+        // pre-existing users (e.g. a local break-glass admin, or LDAP-managed accounts) on
+        // their first SSO login and break their password path.
+        if (!string.IsNullOrEmpty(defaultProvider)
+            && string.Equals(user.AuthenticationProviderId, GetType().FullName, StringComparison.Ordinal))
         {
             policy.AuthenticationProviderId = defaultProvider;
             _logger.LogInformation("Set default login provider to " + defaultProvider);
@@ -1831,14 +1933,9 @@ public class SSOController : ControllerBase
         {
             try
             {
-                using var client = _httpClientFactory.CreateClient();
+                using var client = CreatePluginHttpClient();
 
-                System.Reflection.Assembly assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                System.Diagnostics.FileVersionInfo fvi = System.Diagnostics.FileVersionInfo.GetVersionInfo(assembly.Location);
-                string version = fvi.FileVersion;
-                client.DefaultRequestHeaders.UserAgent.ParseAdd($"Jellyfin-Plugin-SSO-Auth +{version} (https://github.com/9p4/jellyfin-plugin-sso)");
-
-                var avatarResponse = await client.GetAsync(avatarUrl);
+                using var avatarResponse = await client.GetAsync(avatarUrl).ConfigureAwait(false);
 
                 if (!avatarResponse.Content.Headers.TryGetValues("content-type", out var contentTypeList))
                 {
@@ -1846,13 +1943,13 @@ public class SSOController : ControllerBase
                 }
 
                 var contentType = contentTypeList.First();
-                if (!contentType.StartsWith("image"))
+                if (!contentType.StartsWith("image", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new Exception("Content type of avatar URL is not an image, got :  " + contentType);
                 }
 
                 var extension = contentType.Split("/").Last();
-                var stream = await avatarResponse.Content.ReadAsStreamAsync();
+                using var stream = await avatarResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
 
                 if (user != null)
                 {
@@ -1874,7 +1971,7 @@ public class SSOController : ControllerBase
             }
             catch (Exception e)
             {
-                _logger.LogError(e.Message);
+                _logger.LogError(e, "Failed to set the profile image from {AvatarUrl}", avatarUrl);
             }
         }
 
@@ -1888,6 +1985,32 @@ public class SSOController : ControllerBase
         _logger.LogInformation("Auth request created...");
 
         return await _sessionManager.AuthenticateDirect(authRequest).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Logs the discovery trust checks a provider has switched off.
+    /// </summary>
+    /// <remarks>
+    /// Each of these exists for a real provider quirk, but they weaken how far the discovery
+    /// document can be trusted, and nothing else in the plugin surfaces that they are set.
+    /// </remarks>
+    /// <param name="config">The provider configuration.</param>
+    private void WarnAboutRelaxedDiscovery(OidConfig config)
+    {
+        if (config.DisableHttps)
+        {
+            _logger.LogWarning("HTTPS is not required for OpenID discovery on {Endpoint}; the discovery document and tokens may travel in the clear", config.OidEndpoint?.Trim());
+        }
+
+        if (config.DoNotValidateIssuerName)
+        {
+            _logger.LogWarning("Issuer name validation is disabled for {Endpoint}; the discovery document is no longer checked against the configured issuer", config.OidEndpoint?.Trim());
+        }
+
+        if (config.DoNotValidateEndpoints)
+        {
+            _logger.LogWarning("Endpoint validation is disabled for {Endpoint}; the provider may advertise endpoints on unrelated hosts", config.OidEndpoint?.Trim());
+        }
     }
 
     private void Invalidate()
@@ -1912,6 +2035,38 @@ public class SSOController : ControllerBase
     private static bool IsAuthorizationStateExpired(DateTime created)
     {
         return DateTime.UtcNow.Subtract(created.ToUniversalTime()) > AuthorizationStateLifetime;
+    }
+
+    private HttpClient CreateOidcHttpClient(OidcClientOptions options)
+    {
+        var client = CreatePluginHttpClient();
+        client.Timeout = options.BackchannelTimeout;
+
+        return client;
+    }
+
+    private HttpClient CreatePluginHttpClient()
+    {
+        var client = _httpClientFactory.CreateClient(NamedClient.Default);
+
+        Assembly assembly = Assembly.GetExecutingAssembly();
+        System.Diagnostics.FileVersionInfo fileVersionInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(assembly.Location);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"Jellyfin-Plugin-SSO-Auth +{fileVersionInfo.FileVersion} (https://github.com/9p4/jellyfin-plugin-sso)");
+        return client;
+    }
+
+    private static string GetDiscoveryEndpointForLog(string authority)
+    {
+        const string DiscoveryPath = "/.well-known/openid-configuration";
+        if (!Uri.TryCreate(authority, UriKind.Absolute, out var uri))
+        {
+            return "(invalid OpenID endpoint)";
+        }
+
+        string endpoint = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        return endpoint.EndsWith(DiscoveryPath, StringComparison.OrdinalIgnoreCase)
+            ? endpoint
+            : endpoint + DiscoveryPath;
     }
 
     private string GetRequestBase(string schemeOverride = null, int? portOverride = null)

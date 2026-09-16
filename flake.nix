@@ -16,7 +16,7 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            pkgs.dotnet-sdk_9
+            pkgs.dotnet-sdk_10
             pkgs.nodejs # for `npx prettier`, matching .github/workflows/prettier.yml
             pkgs.zstd # test-env/scripts/*.sh unpack the Jellyfin snapshots
           ];

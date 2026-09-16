@@ -1,9 +1,9 @@
-name: "SSO Authentication"
+name: "SSO-Auth"
 guid: "505ce9d1-d916-42fa-86ca-673ef241d7df"
 imageUrl: "https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/main/img/logo.png"
-version: "5.1.0.0"
-targetAbi: "10.11.0.0"
-framework: "net9.0"
+version: "6.0.0.0"
+targetAbi: "12.0.0.0"
+framework: "net10.0"
 owner: "9p4"
 overview: "Authenticate users against an SSO provider."
 description: |
@@ -20,6 +20,7 @@ artifacts:
   - "Microsoft.IdentityModel.Abstractions.dll"
   - "Microsoft.Bcl.Cryptography.dll"
 changelog: |
+  6.0.0.0: Jellyfin 12 support (net10.0, targetAbi 12.0.0.0, Jellyfin.Controller/Model 12.0.0). The self-service linking page authenticates with the Authorization header instead of the legacy X-Emby-Authorization header that Jellyfin 12 disables by default, and no longer bundles the archived Jellyfin JS API client. OpenID back-channel requests use Jellyfin's default HTTP client and time out with a logged diagnostic instead of hanging. The package name now matches the runtime plugin name so Jellyfin removes superseded versions on upgrade. Pre-existing accounts keep their own authentication provider on first SSO login. New per-provider DisableUsernameAccountAdoption option refuses to bind an unlinked identity to an existing local account by username. Role claims may be JSON object keys (Zitadel). The settings page appears in the dashboard sidebar. Sessions report the running server version, avatar downloads are disposed, unlinking an unknown name returns 404, and the link store no longer drops writes when empty.
   5.1.0.0: Consolidated fork release. OIDC identities are keyed on the sub claim, so a username change at the provider no longer breaks login or provisions a duplicate account (#146); links created before this are migrated on next login. Role mapping accepts multiple claim paths. The configured folder list now applies alongside folder roles instead of being ignored. A failed UserInfo request explains the Cloudflare Access workaround instead of erroring blankly. Dependencies refreshed and the vulnerable System.Security.Cryptography.Xml pin removed.
   5.0.0.2: Add OID device code flow authentication endpoint (POST /sso/OID/DeviceAuth/{provider}, RFC 8628).
   5.0.0.1: Restyle the sign-in handoff page to match Jellyfin: native MDL spinner with the status text centered beneath it, and errors shown in red instead of plain text. Themeable via CSS variables.

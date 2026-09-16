@@ -20,7 +20,7 @@ source "$(dirname "$0")/_lib.sh"
 require_baseline_tools
 
 # Determine target Jellyfin version (mirrors the compose default).
-JELLYFIN_VERSION="${JELLYFIN_VERSION:-10.11.10}"
+JELLYFIN_VERSION="${JELLYFIN_VERSION:-12.0}"
 if [[ -f "${TEST_ENV_DIR}/.env" ]]; then
   # shellcheck disable=SC1091
   source "${TEST_ENV_DIR}/.env"

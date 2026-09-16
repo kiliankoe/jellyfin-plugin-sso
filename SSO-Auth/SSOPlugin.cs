@@ -50,7 +50,11 @@ public class SSOPlugin : BasePlugin<PluginConfiguration>, IPlugin, IHasWebPages
             new PluginPageInfo
             {
                 Name = Name,
-                EmbeddedResourcePath = $"{GetType().Namespace}.Config.configPage.html"
+                DisplayName = "SSO Authentication",
+                EmbeddedResourcePath = $"{GetType().Namespace}.Config.configPage.html",
+                EnableInMainMenu = true,
+                MenuSection = "server",
+                MenuIcon = "login"
             },
             new PluginPageInfo
             {
@@ -117,11 +121,6 @@ public class SSOPlugin : BasePlugin<PluginConfiguration>, IPlugin, IHasWebPages
             {
                 Name = "linking.css",
                 EmbeddedResourcePath = $"{GetType().Namespace}.Views.linking.css"
-            },
-            new PluginPageInfo
-            {
-                Name = "jellyfin-apiClient.esm.min.js",
-                EmbeddedResourcePath = $"{GetType().Namespace}.Views.jellyfin-apiClient.esm.min.js"
             },
         };
     }

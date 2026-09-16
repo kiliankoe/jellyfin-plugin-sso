@@ -6,7 +6,7 @@ against a real OIDC provider (Dex).
 ## Prerequisites
 
 - Docker (Docker Desktop or Colima 0.5+)
-- `dotnet` SDK matching the plugin's target framework (`net9.0`)
+- `dotnet` SDK matching the plugin's target framework (`net10.0`)
 - `bash`, `curl`, `jq`, `tar`, `zstd`
 
 Scripts will check for each and exit cleanly if anything is missing. They

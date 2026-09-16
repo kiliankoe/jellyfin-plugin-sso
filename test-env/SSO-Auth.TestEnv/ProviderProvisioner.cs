@@ -52,7 +52,7 @@ public sealed class ProviderProvisioner(EnvConfig config)
             Console.Out.WriteLine($"[+] Registering provider '{providerName}' from {Path.GetFileName(seedFile)} ...");
             var seedJson = ResolveFolderNames(await File.ReadAllTextAsync(seedFile, ct), libraryIdsByName);
             var addResponse = await http.PostAsync(
-                $"/sso/OID/Add/{providerName}?api_key={Uri.EscapeDataString(apiKey)}",
+                $"/sso/OID/Add/{providerName}?ApiKey={Uri.EscapeDataString(apiKey)}",
                 new StringContent(seedJson, Encoding.UTF8, "application/json"),
                 ct);
             addResponse.EnsureSuccessStatusCode();
@@ -60,7 +60,7 @@ public sealed class ProviderProvisioner(EnvConfig config)
 
         Console.Out.WriteLine("[+] Verifying provider registration ...");
         var getResponse = await http.GetAsync(
-            $"/sso/OID/Get?api_key={Uri.EscapeDataString(apiKey)}",
+            $"/sso/OID/Get?ApiKey={Uri.EscapeDataString(apiKey)}",
             ct);
         getResponse.EnsureSuccessStatusCode();
         var body = await getResponse.Content.ReadAsStringAsync(ct);
@@ -158,7 +158,7 @@ public sealed class ProviderProvisioner(EnvConfig config)
     private async Task WaitForPluginRoutesAsync(HttpClient http, string apiKey, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow.AddSeconds(config.PluginReadyTimeoutSeconds);
-        var url = $"/sso/OID/Get?api_key={Uri.EscapeDataString(apiKey)}";
+        var url = $"/sso/OID/Get?ApiKey={Uri.EscapeDataString(apiKey)}";
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
